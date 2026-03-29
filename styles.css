@@ -1623,3 +1623,65 @@ input, textarea {
 .auth-shake {
   animation: authShake 0.45s ease;
 }
+
+/* Provider Selector */
+.provider-selector {
+  margin-bottom: 16px;
+}
+
+.provider-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.provider-options {
+  display: flex;
+  gap: 12px;
+}
+
+.provider-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 16px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  transition: border-color 0.2s, background 0.2s;
+  flex: 1;
+  justify-content: center;
+}
+
+.provider-option:hover {
+  border-color: var(--accent-color, #7c6af7);
+}
+
+.provider-option input[type="radio"] {
+  accent-color: var(--accent-color, #7c6af7);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.provider-option input[type="radio"]:checked + .provider-option-label {
+  color: var(--accent-color, #7c6af7);
+  font-weight: 600;
+}
+
+.provider-option:has(input:checked) {
+  border-color: var(--accent-color, #7c6af7);
+  background: rgba(124, 106, 247, 0.08);
+}
+
+.provider-option-label {
+  font-size: 14px;
+  color: var(--text-primary, #eee);
+  cursor: pointer;
+  user-select: none;
+}
+}
