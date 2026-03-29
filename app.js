@@ -2000,6 +2000,128 @@ async function callImageGenerationAPI(style, groupId = 'home', aspectRatio = '16
   }
 }
 
+// APIYI (OpenAI互換) 用のアスペクト比→sizeパラメータ変換
+function mapAspectRatioToSize(aspectRatio) {
+  const map = {
+    '16:9':  '1792x1024',
+    '9:16':  '1024x1792',
+    '1:1':   '1024x1024',
+    '4:3':   '1365x1024',
+    '3:4':   '1024x1365',
+    '3:2':   '1536x1024',
+    '2:3':   '1024x1536',
+  };
+  return map[aspectRatio] || '1024x1024';
+}
+
+async function callApiyiAPI(style, groupId, aspectRatio, abortSignal) {
+  console.log('Generating image with APIYI: style:', style, 'groupId:', groupId, 'aspectRatio:', aspectRatio);
+
+  if (!apiyiApiKey || apiyiApiKey.trim() === '') {
+    throw new Error('APIYIのAPIキーが設定されていません。右上の「⚙️ API設定」ボタンからAPIキーを入力してください。');
+  }
+
+  // タイトルとページ内容を取得
+  const title = titleInput.value.trim();
+  const content = pageContentTextarea.value;
+  const themeColor = getSelectedThemeColor();
+
+  // プロンプトを取得
+  let stylePrompt = '';
+  if (groupId === 'home') {
+    const designs = designConfig.designs || designConfig.styles || [];
+    const styleConfig = designs.find(s => s.id === style);
+    stylePrompt = styleConfig ? styleConfig.prompt : '';
+  } else {
+    const group = designGroups.find(g => g.id === groupId);
+    if (group && group.designs) {
+      const design = group.designs.find(d => d.id === style);
+      stylePrompt = design ? design.prompt : '';
+    }
+  }
+
+  const colorInstructions = {
+    auto: '',
+    red: '\n- Primary color scheme: Red tones (#e74c3c, crimson, burgundy)',
+    blue: '\n- Primary color scheme: Blue tones (#3498db, navy, sky blue)',
+    green: '\n- Primary color scheme: Green tones (#2ecc71, forest green, emerald)',
+    yellow: '\n- Primary color scheme: Yellow tones (#f1c40f, gold, amber)',
+    purple: '\n- Primary color scheme: Purple tones (#9b59b6, violet, lavender)',
+    orange: '\n- Primary color scheme: Orange tones (#e67e22, coral, tangerine)',
+    pink: '\n- Primary color scheme: Pink tones (#ec7aa5, rose, magenta)',
+    white: '\n- Primary color scheme: White and light tones (#ffffff, ivory, cream, light gray)',
+    navy: '\n- Primary color scheme: Navy tones (#34495e, dark blue, midnight blue)',
+    gray: '\n- Primary color scheme: Gray tones (#95a5a6, silver, charcoal)',
+    black: '\n- Primary color scheme: Black and dark tones (#2c3e50, charcoal, slate)'
+  };
+
+  let fullPrompt = stylePrompt;
+  if (themeColor !== 'auto') {
+    fullPrompt += colorInstructions[themeColor] || '';
+  }
+  fullPrompt += '\n\nContent Guidelines:';
+  fullPrompt += '\n- Focus on the core topic and main message from the article';
+  fullPrompt += '\n- Include dates ONLY if they are central to the story (e.g., historical events, commemorations, time-sensitive announcements)';
+  fullPrompt += '\n- Exclude irrelevant metadata like publication dates, last updated timestamps, author names, or page numbers';
+  fullPrompt += '\n- DO NOT include temporal/dimensional information such as: "today\'s date" (今日の日付), "article count" (残り記事数), "reading time estimates", "view counts", "share counts", or similar statistics';
+  fullPrompt += '\n- Extract and emphasize the key points that would attract viewers';
+  fullPrompt += '\n\n';
+  if (title) {
+    fullPrompt += `タイトル: ${title}\n\n`;
+  }
+  fullPrompt += `記事本文:\n${content.substring(0, 1000)}`;
+
+  const requestBody = {
+    model: 'nano-banana-pro',
+    prompt: fullPrompt,
+    n: 1,
+    size: mapAspectRatioToSize(aspectRatio),
+  };
+
+  const fetchOptions = {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiyiApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  };
+
+  if (abortSignal) {
+    fetchOptions.signal = abortSignal;
+  }
+
+  try {
+    const response = await fetch('https://api.apiyi.com/v1/images/generations', fetchOptions);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const isBalanceError = response.status === 402 ||
+        (errorData.error && errorData.error.message &&
+          ['balance', 'credit', 'payment', 'insufficient'].some(kw =>
+            errorData.error.message.toLowerCase().includes(kw)
+          ));
+      if (isBalanceError) {
+        throw new Error('APIYI_BALANCE_INSUFFICIENT');
+      }
+      const errorMsg = (errorData.error && errorData.error.message) || response.statusText;
+      throw new Error(`APIYI API Error: ${response.status} - ${errorMsg}`);
+    }
+
+    const data = await response.json();
+    console.log('APIYI API Response:', data);
+
+    if (data.data && data.data.length > 0 && data.data[0].url) {
+      return data.data[0].url;
+    }
+    throw new Error('APIYIからの画像生成に失敗しました');
+
+  } catch (error) {
+    console.error('APIYI API Error:', error);
+    throw error;
+  }
+}
+
 // 結果をポーリングで取得（app.jsの実装を参考）
 async function pollForResult(requestId, statusUrl, resultUrl, abortSignal = null) {
   console.log(`FAL AIキューからの結果取得を開始: request_id: ${requestId}`);
