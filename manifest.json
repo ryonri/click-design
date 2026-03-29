@@ -17,7 +17,8 @@
     "https://api.fal.run/*",
     "https://rest.alpha.fal.ai/*",
     "https://v3b.fal.media/*",
-    "https://fal.media/*"
+    "https://fal.media/*",
+    "https://api.apiyi.com/*"
   ],
   "icons": {
     "16": "icons/favicon.png",
