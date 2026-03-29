@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>パスワード変更ツール - ClickDesign</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #0f0f11;
+      color: #f3f4f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid #2a2a2d;
+      border-radius: 16px;
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    }
+    h1 {
+      margin: 0 0 0.4rem 0;
+      font-size: 1.3rem;
+      color: #f3f4f6;
+    }
+    p.sub {
+      margin: 0 0 2rem 0;
+      font-size: 0.88rem;
+      color: #9ca3af;
+      line-height: 1.6;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: #1a1a1c;
+      border: 1px solid #2a2a2d;
+      border-radius: 10px;
+      color: #f3f4f6;
+      font-size: 1rem;
+      outline: none;
+      box-sizing: border-box;
+      margin-bottom: 1rem;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #3b82f6;
+    }
+    button {
+      width: 100%;
+      padding: 0.8rem;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 1.5rem;
+    }
+    button:hover { background: #2563eb; }
+
+    .result-box {
+      display: none;
+      background: #1a1a1c;
+      border: 1px solid #2a2a2d;
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .result-box label {
+      margin-bottom: 8px;
+      color: #10b981;
+      font-weight: 600;
+    }
+    .hash-text {
+      font-family: monospace;
+      font-size: 0.78rem;
+      word-break: break-all;
+      color: #f3f4f6;
+      margin-bottom: 0.75rem;
+      line-height: 1.6;
+    }
+    .copy-btn {
+      width: auto;
+      padding: 0.5rem 1.2rem;
+      font-size: 0.88rem;
+      margin-bottom: 0;
+      background: #10b981;
+    }
+    .copy-btn:hover { background: #059669; }
+
+    .step-box {
+      margin-top: 1.5rem;
+      background: rgba(59,130,246,0.08);
+      border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      font-size: 0.85rem;
+      color: #93c5fd;
+      line-height: 1.8;
+    }
+    .step-box strong { color: #f3f4f6; }
+    code {
+      background: rgba(255,255,255,0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.82rem;
+    }
+    .copied-msg {
+      display: none;
+      color: #10b981;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔑 パスワード変更ツール</h1>
+    <p class="sub">新しいパスワードを入力してハッシュを生成し、<code>auth_config.js</code> に貼り付けてください。</p>
+
+    <label>新しいパスワード</label>
+    <input type="password" id="pwInput" placeholder="新しいパスワードを入力">
+
+    <button onclick="generateHash()">ハッシュを生成する</button>
+
+    <div class="result-box" id="resultBox">
+      <label>✅ 生成されたハッシュ（コピーして使ってください）</label>
+      <div class="hash-text" id="hashOutput"></div>
+      <button class="copy-btn" onclick="copyHash()">コピー</button>
+      <p class="copied-msg" id="copiedMsg">コピーしました！</p>
+    </div>
+
+    <div class="step-box">
+      <strong>次のステップ</strong><br>
+      1. 上で「コピー」を押す<br>
+      2. <code>auth_config.js</code> をメモ帳で開く<br>
+      3. <code>passwordHash: '</code> の後ろの長い文字列を選択して貼り付ける<br>
+      4. ファイルを保存して完了 🎉
+    </div>
+  </div>
+
+  <script>
+    async function generateHash() {
+      const pw = document.getElementById('pwInput').value;
+      if (!pw) {
+        alert('パスワードを入力してください。');
+        return;
+      }
+      const data = new TextEncoder().encode(pw);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hash = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
+      document.getElementById('hashOutput').textContent = hash;
+      document.getElementById('resultBox').style.display = 'block';
+      document.getElementById('copiedMsg').style.display = 'none';
+    }
+
+    function copyHash() {
+      const hash = document.getElementById('hashOutput').textContent;
+      navigator.clipboard.writeText(hash).then(() => {
+        document.getElementById('copiedMsg').style.display = 'block';
+      });
+    }
+
+    // Enterキーでも生成できるように
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('pwInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') generateHash();
+      });
+    });
+  </script>
+</body>
+</html>
