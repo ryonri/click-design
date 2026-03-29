@@ -253,12 +253,28 @@
   <div id="apiModal" class="modal">
     <div class="modal-card api-modal-card">
       <div class="modal-header">
-        <h2><i class="fas fa-key"></i> FAL API設定</h2>
+        <h2><i class="fas fa-key"></i> API設定</h2>
         <span class="close">&times;</span>
       </div>
       <div class="modal-body">
+
+        <!-- プロバイダー選択 -->
+        <div class="provider-selector">
+          <label class="provider-label">プロバイダー選択</label>
+          <div class="provider-options">
+            <label class="provider-option">
+              <input type="radio" name="provider" value="fal" id="providerFal" checked>
+              <span class="provider-option-label">FAL AI</span>
+            </label>
+            <label class="provider-option">
+              <input type="radio" name="provider" value="apiyi" id="providerApiyi">
+              <span class="provider-option-label">APIYI</span>
+            </label>
+          </div>
+        </div>
+
         <div class="api-input-section">
-          <label for="falExternalKeyConfig">FAL API Key</label>
+          <label for="falExternalKeyConfig" id="apiKeyLabel">FAL API Key</label>
           <div class="input-wrapper glow-effect">
             <input type="text" id="falExternalKeyConfig" placeholder="APIキーを入力してください (例: fal_key_...)"
               autocomplete="new-password" style="-webkit-text-security: disc; text-security: disc;" data-lpignore="true"
@@ -266,7 +282,8 @@
           </div>
         </div>
 
-        <div class="api-guide-section">
+        <!-- FAL AI ガイド -->
+        <div class="api-guide-section" id="guideBlockFal">
           <div class="guide-item">
             <div class="guide-icon"><i class="fas fa-external-link-alt"></i></div>
             <div class="guide-content">
@@ -277,7 +294,6 @@
               <p>でFAL APIキーを取得してください</p>
             </div>
           </div>
-
           <div class="guide-item">
             <div class="guide-icon"><i class="fas fa-credit-card"></i></div>
             <div class="guide-content">
@@ -286,6 +302,27 @@
                 こちらのページ<i class="fas fa-arrow-right"></i>
               </a>
               <p>でクレジットをチャージしてください</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- APIYI ガイド -->
+        <div class="api-guide-section" id="guideBlockApiyi" style="display: none;">
+          <div class="guide-item">
+            <div class="guide-icon"><i class="fas fa-external-link-alt"></i></div>
+            <div class="guide-content">
+              <h3>APIキーの取得方法</h3>
+              <a href="https://api.apiyi.com" target="_blank" class="link-btn">
+                こちらのページ<i class="fas fa-arrow-right"></i>
+              </a>
+              <p>でAPIYI APIキーを取得してください</p>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="guide-icon"><i class="fas fa-yen-sign"></i></div>
+            <div class="guide-content">
+              <h3>料金</h3>
+              <p>nano-banana-pro: $0.05/枚</p>
             </div>
           </div>
         </div>
