@@ -163,6 +163,8 @@ const toastElement = document.getElementById('toast');
 
 let currentPageContent = '';
 let falApiKey = null;
+let apiyiApiKey = '';
+let selectedProvider = 'fal'; // 'fal' | 'apiyi'
 let generatedImages = {}; // スタイルごとの生成画像を保存
 let designConfig = null; // デザイン設定
 let designGroups = []; // デザイングループのリスト
@@ -1295,6 +1297,19 @@ function setupEventListeners() {
   cancelApiBtn.addEventListener('click', closeApiModal);
   saveApiBtn.addEventListener('click', saveApiKey);
 
+  document.querySelectorAll('input[name="provider"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const newProvider = e.target.value;
+      // 切り替え前のキーを一時保存し、切り替え先のキーを入力欄に表示
+      if (newProvider === 'apiyi') {
+        apiKeyInput.value = apiyiApiKey || '';
+      } else {
+        apiKeyInput.value = falApiKey || '';
+      }
+      updateApiModalForProvider(newProvider);
+    });
+  });
+
   // 画像拡大モーダル
   imageModal.addEventListener('click', (e) => {
     // オーバーレイクリック時のみ閉じる（コンテンツ内クリックは閉じない）
@@ -1353,16 +1368,50 @@ function setupEventListeners() {
 
 // APIキーの読み込み
 async function loadApiKey() {
-  const result = await window.browserStorage.get('falApiKey');
+  const result = await window.browserStorage.get(['falApiKey', 'apiyiApiKey', 'selectedProvider']);
   if (result.falApiKey) {
     falApiKey = result.falApiKey;
+  }
+  if (result.apiyiApiKey) {
+    apiyiApiKey = result.apiyiApiKey;
+  }
+  if (result.selectedProvider) {
+    selectedProvider = result.selectedProvider;
   }
 }
 
 // APIモーダルを開く
 function openApiModal() {
-  apiKeyInput.value = falApiKey || '';
+  // ラジオボタンを現在のプロバイダーに合わせてセット
+  const radioFal = document.getElementById('providerFal');
+  const radioApiyi = document.getElementById('providerApiyi');
+  if (radioFal && radioApiyi) {
+    radioFal.checked = selectedProvider === 'fal';
+    radioApiyi.checked = selectedProvider === 'apiyi';
+  }
+  // 対応するキーを入力欄に復元
+  apiKeyInput.value = selectedProvider === 'apiyi' ? (apiyiApiKey || '') : (falApiKey || '');
+  updateApiModalForProvider(selectedProvider);
   apiModal.classList.add('show');
+}
+
+// プロバイダー切り替え時にモーダルUIを更新するヘルパー
+function updateApiModalForProvider(provider) {
+  const guideBlockFal = document.getElementById('guideBlockFal');
+  const guideBlockApiyi = document.getElementById('guideBlockApiyi');
+  const apiKeyLabel = document.getElementById('apiKeyLabel');
+
+  if (provider === 'apiyi') {
+    if (guideBlockFal) guideBlockFal.style.display = 'none';
+    if (guideBlockApiyi) guideBlockApiyi.style.display = '';
+    if (apiKeyLabel) apiKeyLabel.textContent = 'APIYI API Key';
+    apiKeyInput.placeholder = 'APIキーを入力してください (例: sk-...)';
+  } else {
+    if (guideBlockFal) guideBlockFal.style.display = '';
+    if (guideBlockApiyi) guideBlockApiyi.style.display = 'none';
+    if (apiKeyLabel) apiKeyLabel.textContent = 'FAL API Key';
+    apiKeyInput.placeholder = 'APIキーを入力してください (例: fal_key_...)';
+  }
 }
 
 // APIモーダルを閉じる
@@ -1422,7 +1471,8 @@ function checkApiKeyWarning() {
   const warningElement = document.getElementById('apiKeyWarning');
   if (!warningElement) return;
 
-  if (!falApiKey || falApiKey.trim() === '') {
+  const activeKey = selectedProvider === 'apiyi' ? apiyiApiKey : falApiKey;
+  if (!activeKey || activeKey.trim() === '') {
     warningElement.style.display = 'inline-block';
   } else {
     warningElement.style.display = 'none';
@@ -1437,12 +1487,28 @@ async function saveApiKey() {
     return;
   }
 
-  falApiKey = newApiKey;
-  await window.browserStorage.set({ falApiKey: newApiKey });
+  // 選択中のプロバイダーを読み取る
+  const radioApiyi = document.getElementById('providerApiyi');
+  const newProvider = (radioApiyi && radioApiyi.checked) ? 'apiyi' : 'fal';
+
+  // プロバイダーが変わった場合はキャッシュをクリア
+  if (newProvider !== selectedProvider) {
+    generatedImages = {};
+  }
+
+  selectedProvider = newProvider;
+
+  if (selectedProvider === 'apiyi') {
+    apiyiApiKey = newApiKey;
+    await window.browserStorage.set({ apiyiApiKey: newApiKey, selectedProvider: 'apiyi' });
+  } else {
+    falApiKey = newApiKey;
+    await window.browserStorage.set({ falApiKey: newApiKey, selectedProvider: 'fal' });
+  }
+
   alert('APIキーを保存しました');
   closeApiModal();
 
-  // APIキー警告表示を更新
   checkApiKeyWarning();
 }
 
