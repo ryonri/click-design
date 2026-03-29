@@ -1640,7 +1640,7 @@ async function handleStyleSelection(button) {
           <div style="color: #e67e22; font-size: 14px; font-weight: bold;">⏱️ タイムアウトしました</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">画像生成に時間がかかっています。もう一度「生成」ボタンを押してください。</div>
         `;
-      } else if (error.message && error.message.includes('FAL_BALANCE_INSUFFICIENT')) {
+      } else if (error.message && (error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('APIYI_BALANCE_INSUFFICIENT'))) {
         messageDiv.innerHTML = `
           <div style="color: #e67e22; font-size: 14px; font-weight: bold;">💳 FAL APIの残高が不足しています</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">API料金を追加してから、もう一度お試しください。</div>
@@ -1660,7 +1660,7 @@ async function handleStyleSelection(button) {
       generatedImageWrapper.appendChild(messageDiv);
 
       // 10秒後にメッセージを削除（タイムアウト・残高不足の場合は長めに表示）
-      const displayTime = (error.message && (error.message.includes('タイムアウト') || error.message.includes('FAL_BALANCE_INSUFFICIENT'))) ? 10000 : 5000;
+      const displayTime = (error.message && (error.message.includes('タイムアウト') || error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('APIYI_BALANCE_INSUFFICIENT'))) ? 10000 : 5000;
       setTimeout(() => {
         if (generatedImageWrapper.contains(messageDiv)) {
           generatedImageWrapper.removeChild(messageDiv);
@@ -1695,7 +1695,12 @@ function getSelectedThemeColor() {
 async function callImageGenerationAPI(style, groupId = 'home', aspectRatio = '16:9', abortSignal = null) {
   console.log('Generating image with style:', style, 'groupId:', groupId, 'aspectRatio:', aspectRatio);
 
-  // APIキーのチェック
+  // APIYI プロバイダーの場合は専用関数へ委譲
+  if (selectedProvider === 'apiyi') {
+    return await callApiyiAPI(style, groupId, aspectRatio, abortSignal);
+  }
+
+  // APIキーのチェック（FAL AI）
   if (!falApiKey || falApiKey.trim() === '') {
     throw new Error('APIキーが設定されていません。右上の「⚙️ API設定」ボタンからAPIキーを入力してください。');
   }
