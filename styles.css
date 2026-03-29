@@ -1633,7 +1633,7 @@ input, textarea {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-muted, #aaa);
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1658,23 +1658,23 @@ input, textarea {
 }
 
 .provider-option:hover {
-  border-color: var(--accent-color, #7c6af7);
+  border-color: var(--accent, #8b5cf6);
 }
 
 .provider-option input[type="radio"] {
-  accent-color: var(--accent-color, #7c6af7);
+  accent-color: var(--accent, #8b5cf6);
   width: 15px;
   height: 15px;
   cursor: pointer;
 }
 
 .provider-option input[type="radio"]:checked + .provider-option-label {
-  color: var(--accent-color, #7c6af7);
+  color: var(--accent, #8b5cf6);
   font-weight: 600;
 }
 
 .provider-option:has(input:checked) {
-  border-color: var(--accent-color, #7c6af7);
+  border-color: var(--accent, #8b5cf6);
   background: rgba(124, 106, 247, 0.08);
 }
 
@@ -1683,5 +1683,4 @@ input, textarea {
   color: var(--text-primary, #eee);
   cursor: pointer;
   user-select: none;
-}
 }

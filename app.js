@@ -163,7 +163,7 @@ const toastElement = document.getElementById('toast');
 
 let currentPageContent = '';
 let falApiKey = null;
-let apiyiApiKey = '';
+let apiyiApiKey = null;
 let selectedProvider = 'fal'; // 'fal' | 'apiyi'
 let generatedImages = {}; // スタイルごとの生成画像を保存
 let designConfig = null; // デザイン設定
@@ -1642,7 +1642,7 @@ async function handleStyleSelection(button) {
         `;
       } else if (error.message && (error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('APIYI_BALANCE_INSUFFICIENT'))) {
         messageDiv.innerHTML = `
-          <div style="color: #e67e22; font-size: 14px; font-weight: bold;">💳 FAL APIの残高が不足しています</div>
+          <div style="color: #e67e22; font-size: 14px; font-weight: bold;">💳 APIの残高が不足しています</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">API料金を追加してから、もう一度お試しください。</div>
         `;
       } else if (error.message && error.message.includes('APIキーが設定されていません')) {
