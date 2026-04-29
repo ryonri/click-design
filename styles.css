@@ -1585,6 +1585,17 @@ input, textarea {
   margin-bottom: 1rem;
 }
 
+.auth-info {
+  font-size: 0.85rem;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
 .auth-login-btn {
   width: 100%;
   padding: 0.8rem 1rem;
@@ -1683,4 +1694,436 @@ input, textarea {
   color: var(--text-primary, #eee);
   cursor: pointer;
   user-select: none;
+}
+
+/* ===========================
+   タブ内保存ボタン
+   =========================== */
+
+.tab-pane-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0.5rem 0 0.75rem 0;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.tab-save-btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--border-highlight);
+}
+
+.tab-save-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.tab-save-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.tab-save-btn[data-state="success"] {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.tab-save-btn[data-state="error"] {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+.tab-save-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.tab-save-label {
+  line-height: 1;
+}
+
+/* ===== サムネ生成ツールモーダル ===== */
+
+/* フレームワークガイド */
+.tgt-framework {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.tgt-framework-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+  transition: background 0.2s;
+}
+
+.tgt-framework-header:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.tgt-framework-chevron {
+  margin-left: auto;
+  font-size: 0.75rem;
+  transition: transform 0.3s;
+}
+
+.tgt-framework-header.open .tgt-framework-chevron {
+  transform: rotate(180deg);
+}
+
+.tgt-framework-body {
+  padding: 0 16px 16px;
+}
+
+.tgt-ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.tgt-ratio-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  cursor: default;
+  transition: border-color 0.2s;
+}
+
+.tgt-ratio-item:hover {
+  border-color: #6366f1;
+}
+
+.tgt-ratio-preview {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  border-radius: 3px;
+  opacity: 0.8;
+}
+
+/* アスペクト比別プレビューサイズ */
+.tgt-ratio-preview.r-16-9  { width: 40px; height: 22.5px; }
+.tgt-ratio-preview.r-5-2   { width: 45px; height: 18px; }
+.tgt-ratio-preview.r-21-9  { width: 46px; height: 19.7px; }
+.tgt-ratio-preview.r-1-1   { width: 30px; height: 30px; }
+.tgt-ratio-preview.r-9-16  { width: 22.5px; height: 40px; }
+.tgt-ratio-preview.r-4-3   { width: 36px; height: 27px; }
+.tgt-ratio-preview.r-3-4   { width: 27px; height: 36px; }
+
+.tgt-ratio-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tgt-ratio-info strong {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.tgt-ratio-info span {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ステップカード */
+.tgt-step-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.tgt-step-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0 0 1rem;
+}
+
+.tgt-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #6366f1;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* アップロードゾーン */
+.tgt-upload-zone {
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  border-radius: var(--radius-md);
+  padding: 2rem 1rem;
+  text-align: center;
+  background: rgba(99, 102, 241, 0.03);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.tgt-upload-zone.dragging {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.tgt-upload-zone.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tgt-upload-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.tgt-upload-zone .btn {
+  pointer-events: auto;
+}
+
+/* プログレス */
+.tgt-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-md);
+  color: #6366f1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+/* エラーメッセージ */
+.tgt-error-msg {
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  color: #ef4444;
+  font-size: 0.82rem;
+  margin-bottom: 1rem;
+}
+
+/* 結果グリッド */
+.tgt-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+/* テンプレートカード */
+.tgt-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.tgt-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tgt-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tgt-card-id {
+  background: #6366f1;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tgt-card-name {
+  border: none;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+  outline: none;
+  min-width: 0;
+  flex: 1;
+}
+
+.tgt-card-remove {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.tgt-card-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.tgt-card-thumb {
+  padding: 10px;
+}
+
+.tgt-card-thumb img {
+  width: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+  max-height: 160px;
+}
+
+.tgt-card-settings {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tgt-card-settings label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.tgt-card-settings select,
+.tgt-card-settings textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.tgt-card-settings select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.tgt-card-settings select option {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.tgt-card-settings textarea {
+  font-family: 'Courier New', monospace;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.tgt-card-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.tgt-card-checkbox input[type="checkbox"] {
+  margin: 0;
+}
+
+/* エクスポート行 */
+.tgt-export-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tgt-group-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--bg-primary);
+  color: var(--text-main);
+}
+
+@media (max-width: 600px) {
+  .tgt-ratio-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .tgt-results-grid {
+    grid-template-columns: 1fr;
+  }
+  .tgt-export-row {
+    flex-direction: column;
+  }
+  .tgt-export-row .btn {
+    width: 100%;
+  }
 }

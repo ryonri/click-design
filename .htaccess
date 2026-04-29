@@ -1,0 +1,28 @@
+# ===== ClickDesign 1.2 URL統一 & セキュリティ =====
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /clickdesign1.2/
+
+  # 1) /clickdesign1.2/index.html → /clickdesign1.2/ へ 301 統一
+  #    Magic Link の戻り（?apiKey=... を含む）はリダイレクトしない
+  RewriteCond %{QUERY_STRING} !(^|&)apiKey= [NC]
+  RewriteCond %{THE_REQUEST} \s/clickdesign1\.2/index\.html[\s?] [NC]
+  RewriteRule ^index\.html$ /clickdesign1.2/ [R=301,L]
+
+</IfModule>
+
+# DirectoryIndex を index.html に固定
+DirectoryIndex index.html
+
+# ログインゲートHTMLのキャッシュ抑制（変更即反映のため）
+<IfModule mod_headers.c>
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# .env 等の秘匿ファイルは 403
+<FilesMatch "^\.(env|git|claude)|^\.DS_Store$">
+  Require all denied
+</FilesMatch>

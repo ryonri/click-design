@@ -1,37 +1,31 @@
 // ============================================================
-// ClickDesign 認証ゲート
+// ClickDesign 認証ゲート (Firebase Magic Link + Firestore ホワイトリスト)
 // ============================================================
 
 (function () {
   'use strict';
 
-  const SESSION_KEY  = 'cd_auth_session';    // localStorage に保存 → 永続認証
-  const CUSTOM_HASH_KEY = 'cd_custom_hash'; // 変更後のパスワードハッシュを保存するキー
+  const EMAIL_FOR_SIGN_IN = 'emailForSignIn';
+  const RESEND_COOLDOWN_KEY = 'cd_lastSendAt';
+  const RESEND_COOLDOWN_MS = 60 * 1000;
 
-  // ----------------------------------------------------------
-  // SHA-256 ハッシュ生成
-  // ----------------------------------------------------------
-  async function hashPassword(password) {
-    const data = new TextEncoder().encode(password);
-    const buf  = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(buf))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
+  function showOverlay() {
+    var overlay = document.getElementById('authOverlay');
+    var app = document.getElementById('appContainer');
+    if (app) app.style.display = 'none';
+    if (overlay) {
+      overlay.style.display = 'flex';
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.3s ease';
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { overlay.style.opacity = '1'; });
+      });
+    }
   }
 
-  // ----------------------------------------------------------
-  // 現在有効なパスワードハッシュを取得
-  // (localStorage に保存済みなら優先、なければ auth_config.js の値)
-  // ----------------------------------------------------------
-  function getActiveHash() {
-    return localStorage.getItem(CUSTOM_HASH_KEY) || AUTH_CONFIG.passwordHash;
-  }
-
-  // ----------------------------------------------------------
-  // アプリを表示
-  // ----------------------------------------------------------
   function revealApp() {
     var overlay = document.getElementById('authOverlay');
-    var app     = document.getElementById('appContainer');
+    var app = document.getElementById('appContainer');
     if (overlay) {
       overlay.style.transition = 'opacity 0.35s ease';
       overlay.style.opacity = '0';
@@ -40,212 +34,191 @@
     if (app) app.style.display = '';
   }
 
-  // ----------------------------------------------------------
-  // セッション確認
-  // ----------------------------------------------------------
-  function isAuthenticated() {
-    return localStorage.getItem(SESSION_KEY) === 'granted';
-  }
-
-  // ----------------------------------------------------------
-  // ログイン処理
-  // ----------------------------------------------------------
-  async function handleLogin() {
-    var input   = document.getElementById('authPasswordInput');
+  function showError(msg) {
     var errorEl = document.getElementById('authErrorMsg');
-    var btn     = document.getElementById('authLoginBtn');
+    if (!errorEl) return;
+    errorEl.textContent = msg;
+    errorEl.style.display = 'block';
+  }
 
-    errorEl.style.display = 'none';
+  function showInfo(msg) {
+    var infoEl = document.getElementById('authInfoMsg');
+    if (!infoEl) return;
+    infoEl.textContent = msg;
+    infoEl.style.display = 'block';
+  }
 
-    if (!input.value) {
-      errorEl.textContent = 'パスワードを入力してください。';
-      errorEl.style.display = 'block';
-      input.focus();
-      return;
-    }
+  function hideMessages() {
+    var errorEl = document.getElementById('authErrorMsg');
+    var infoEl = document.getElementById('authInfoMsg');
+    if (errorEl) errorEl.style.display = 'none';
+    if (infoEl) infoEl.style.display = 'none';
+  }
 
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 認証中...';
+  function isValidEmailFormat(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
 
+  // Firestore の allowlist/{email} が存在するか確認
+  async function isEmailRegistered(email) {
+    const db = firebase.firestore();
+    const docId = String(email).trim().toLowerCase();
     try {
-      var hash = await hashPassword(input.value);
-      if (hash === getActiveHash()) {
-        localStorage.setItem(SESSION_KEY, 'granted');
-        btn.innerHTML = '<i class="fas fa-check"></i> 認証成功';
-        setTimeout(revealApp, 300);
-      } else {
-        errorEl.textContent = 'パスワードが正しくありません。';
-        errorEl.style.display = 'block';
-        input.value = '';
-        input.focus();
-        input.classList.remove('auth-shake');
-        void input.offsetWidth;
-        input.classList.add('auth-shake');
-        btn.disabled = false;
-        btn.innerHTML = 'ログイン';
-      }
+      const snap = await db.collection('allowlist').doc(docId).get();
+      return snap.exists;
     } catch (e) {
-      errorEl.textContent = '認証処理でエラーが発生しました。';
-      errorEl.style.display = 'block';
-      btn.disabled = false;
-      btn.innerHTML = 'ログイン';
+      console.error('allowlist 確認エラー:', e);
+      return false;
     }
   }
 
-  // ----------------------------------------------------------
-  // パスワード変更モーダルを開く (ログイン後に呼ばれる)
-  // ----------------------------------------------------------
-  window.openChangePasswordModal = function () {
-    var modal = document.getElementById('changePasswordModal');
-    if (modal) {
-      document.getElementById('cpCurrentPw').value = '';
-      document.getElementById('cpNewPw').value = '';
-      document.getElementById('cpConfirmPw').value = '';
-      document.getElementById('cpErrorMsg').style.display = 'none';
-      document.getElementById('cpSuccessMsg').style.display = 'none';
-      modal.style.display = 'flex';
-      setTimeout(function () { document.getElementById('cpCurrentPw').focus(); }, 100);
-    }
-  };
-
-  window.closeChangePasswordModal = function () {
-    var modal = document.getElementById('changePasswordModal');
-    if (modal) modal.style.display = 'none';
-  };
-
-  // ----------------------------------------------------------
-  // パスワード変更処理
-  // ----------------------------------------------------------
-  async function handleChangePassword() {
-    var currentPw  = document.getElementById('cpCurrentPw').value;
-    var newPw      = document.getElementById('cpNewPw').value;
-    var confirmPw  = document.getElementById('cpConfirmPw').value;
-    var errorEl    = document.getElementById('cpErrorMsg');
-    var successEl  = document.getElementById('cpSuccessMsg');
-    var btn        = document.getElementById('cpSaveBtn');
-
-    errorEl.style.display = 'none';
-    successEl.style.display = 'none';
-
-    // バリデーション
-    if (!currentPw || !newPw || !confirmPw) {
-      errorEl.textContent = 'すべての項目を入力してください。';
-      errorEl.style.display = 'block';
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof firebase === 'undefined') {
+      showError('認証システムの読み込みに失敗しました。ページを再読み込みしてください。');
+      showOverlay();
       return;
     }
-    if (newPw !== confirmPw) {
-      errorEl.textContent = '新しいパスワードと確認用パスワードが一致しません。';
-      errorEl.style.display = 'block';
-      return;
-    }
-    if (newPw.length < 4) {
-      errorEl.textContent = 'パスワードは4文字以上で設定してください。';
-      errorEl.style.display = 'block';
+    if (typeof firebase.firestore !== 'function') {
+      showError('認証システム（Firestore）の読み込みに失敗しました。');
+      showOverlay();
       return;
     }
 
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
+    const auth = firebase.auth();
 
-    try {
-      // 現在のパスワードを照合
-      var currentHash = await hashPassword(currentPw);
-      if (currentHash !== getActiveHash()) {
-        errorEl.textContent = '現在のパスワードが正しくありません。';
-        errorEl.style.display = 'block';
-        btn.disabled = false;
-        btn.innerHTML = '変更を保存';
+    // 1. ログインリンクから戻ってきたときの処理
+    if (auth.isSignInWithEmailLink(window.location.href)) {
+      showOverlay();
+      let email = window.localStorage.getItem(EMAIL_FOR_SIGN_IN);
+      if (!email) {
+        email = window.prompt('確認のため、ログインしたメールアドレスを再度入力してください：');
+      }
+
+      if (email) {
+        auth.signInWithEmailLink(email, window.location.href)
+          .then(async function () {
+            window.localStorage.removeItem(EMAIL_FOR_SIGN_IN);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            // サインイン成功後に Firestore で最終確認
+            const ok = await isEmailRegistered(email);
+            if (!ok) {
+              await auth.signOut();
+              showError('このメールアドレスは登録されていません。購入後に登録ページから登録してください。');
+              showOverlay();
+              return;
+            }
+            revealApp();
+          })
+          .catch(function (error) {
+            console.error('ログインリンクエラー:', error);
+            showError('リンクの有効期限が切れているか、無効です。再度ログインをお試しください。');
+            window.history.replaceState({}, document.title, window.location.pathname);
+            showOverlay();
+          });
+      } else {
+        showOverlay();
+      }
+      return;
+    }
+
+    // 2. 認証状態の監視
+    auth.onAuthStateChanged(async function (user) {
+      if (!user) {
+        showOverlay();
+        return;
+      }
+      const ok = await isEmailRegistered(user.email);
+      if (ok) {
+        revealApp();
+      } else {
+        await auth.signOut();
+        showError('このメールアドレスは登録されていません。購入後に登録ページから登録してください。');
+        showOverlay();
+      }
+    });
+
+    // 3. ログインリンク送信
+    var loginBtn = document.getElementById('authLoginBtn');
+    var emailInput = document.getElementById('authEmailInput');
+
+    function setButtonLoading(isLoading) {
+      if (!loginBtn) return;
+      if (isLoading) {
+        loginBtn.disabled = true;
+        loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 送信中...';
+      } else {
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = '<i class="fas fa-envelope"></i> ログインリンクを送信';
+      }
+    }
+
+    async function handleSendLink() {
+      hideMessages();
+      var email = (emailInput && emailInput.value || '').trim().toLowerCase();
+
+      if (!email) {
+        showError('メールアドレスを入力してください。');
+        emailInput && emailInput.focus();
+        return;
+      }
+      if (!isValidEmailFormat(email)) {
+        showError('メールアドレスの形式が正しくありません。');
         return;
       }
 
-      // 新しいパスワードをハッシュ化して保存
-      var newHash = await hashPassword(newPw);
-      localStorage.setItem(CUSTOM_HASH_KEY, newHash);
+      setButtonLoading(true);
 
-      successEl.textContent = 'パスワードを変更しました！';
-      successEl.style.display = 'block';
-      btn.innerHTML = '<i class="fas fa-check"></i> 保存完了';
+      // 連続送信防止
+      var lastSendAt = Number(window.localStorage.getItem(RESEND_COOLDOWN_KEY) || 0);
+      var elapsed = Date.now() - lastSendAt;
+      if (elapsed < RESEND_COOLDOWN_MS) {
+        setButtonLoading(false);
+        var wait = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
+        showError('再送信は ' + wait + ' 秒後に可能です。');
+        return;
+      }
 
-      // 入力欄をクリア
-      document.getElementById('cpCurrentPw').value = '';
-      document.getElementById('cpNewPw').value = '';
-      document.getElementById('cpConfirmPw').value = '';
+      const actionCodeSettings = {
+        url: window.location.href,
+        handleCodeInApp: true,
+      };
 
-      setTimeout(window.closeChangePasswordModal, 1500);
-
-    } catch (e) {
-      errorEl.textContent = 'エラーが発生しました。もう一度お試しください。';
-      errorEl.style.display = 'block';
-      btn.disabled = false;
-      btn.innerHTML = '変更を保存';
-    }
-  }
-
-  // ----------------------------------------------------------
-  // DOMContentLoaded
-  // ----------------------------------------------------------
-  document.addEventListener('DOMContentLoaded', function () {
-
-    // セッションが有効なら即座にアプリを表示
-    if (isAuthenticated()) {
-      revealApp();
-    } else {
-      // ログイン画面を表示
-      var overlay = document.getElementById('authOverlay');
-      if (overlay) {
-        overlay.style.display = 'flex';
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.3s ease';
-        requestAnimationFrame(function () {
-          requestAnimationFrame(function () { overlay.style.opacity = '1'; });
-        });
+      try {
+        await auth.sendSignInLinkToEmail(email, actionCodeSettings);
+        window.localStorage.setItem(EMAIL_FOR_SIGN_IN, email);
+        window.localStorage.setItem(RESEND_COOLDOWN_KEY, String(Date.now()));
+        showInfo('ログイン用のリンクを ' + email + ' 宛に送信しました。メールをご確認ください。');
+        if (emailInput) emailInput.value = '';
+      } catch (error) {
+        console.error('送信エラー:', error);
+        if (error.code === 'auth/invalid-email') {
+          showError('有効なメールアドレス形式ではありません。');
+        } else if (error.code === 'auth/too-many-requests') {
+          showError('一時的にアクセスが制限されています。しばらくしてからお試しください。');
+        } else {
+          showError('メールの送信に失敗しました。時間をおいて再度お試しください。');
+        }
+      } finally {
+        setButtonLoading(false);
       }
     }
 
-    // ===== ログインフォーム =====
-    var loginBtn      = document.getElementById('authLoginBtn');
-    var passwordInput = document.getElementById('authPasswordInput');
-    var toggleBtn     = document.getElementById('authTogglePasswordBtn');
-
-    if (loginBtn)      loginBtn.addEventListener('click', handleLogin);
-    if (passwordInput) {
-      passwordInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') handleLogin();
+    if (loginBtn) loginBtn.addEventListener('click', handleSendLink);
+    if (emailInput) {
+      emailInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') handleSendLink();
       });
-      setTimeout(function () { passwordInput.focus(); }, 150);
+      setTimeout(function () { emailInput.focus(); }, 150);
     }
-    if (toggleBtn && passwordInput) {
-      toggleBtn.addEventListener('click', function () {
-        if (passwordInput.type === 'password') {
-          passwordInput.type = 'text';
-          toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
-        } else {
-          passwordInput.type = 'password';
-          toggleBtn.innerHTML = '<i class="fas fa-eye"></i>';
+
+    // 4. ログアウト処理
+    var logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', function () {
+        if (confirm('ログアウトしますか？')) {
+          auth.signOut().then(function () { location.reload(); });
         }
       });
     }
-
-    // ===== パスワード変更モーダル =====
-    var cpSaveBtn  = document.getElementById('cpSaveBtn');
-    var cpCancelBtn = document.getElementById('cpCancelBtn');
-    var cpCloseBtn  = document.getElementById('cpCloseBtn');
-
-    if (cpSaveBtn)   cpSaveBtn.addEventListener('click', handleChangePassword);
-    if (cpCancelBtn) cpCancelBtn.addEventListener('click', window.closeChangePasswordModal);
-    if (cpCloseBtn)  cpCloseBtn.addEventListener('click', window.closeChangePasswordModal);
-
-    // Enterキーで保存
-    ['cpCurrentPw', 'cpNewPw', 'cpConfirmPw'].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') handleChangePassword();
-      });
-    });
-
-    // パスワード変更ボタン (サイドバー)
-    var changePwBtn = document.getElementById('changePasswordBtn');
-    if (changePwBtn) changePwBtn.addEventListener('click', window.openChangePasswordModal);
   });
-
 })();

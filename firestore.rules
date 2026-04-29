@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 合言葉は誰も読み書きできない（ルール内部の get() 参照のみ）
+    match /config/{docId} {
+      allow read, write: if false;
+    }
+
+    // 購入者リスト
+    match /allowlist/{email} {
+      // 登録: 合言葉が config/current.value と一致し、かつ未登録メールのみ許可
+      allow create: if
+        request.resource.data.secret == get(/databases/$(database)/documents/config/current).data.value
+        && !exists(/databases/$(database)/documents/allowlist/$(email));
+
+      // 更新・削除は禁止（購入者はいじれない）
+      allow update, delete: if false;
+
+      // 読み取り: ログイン済みかつ自分のメールのみ
+      allow read: if request.auth != null
+                  && request.auth.token.email.lower() == email;
+    }
+  }
+}

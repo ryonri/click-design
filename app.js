@@ -94,16 +94,13 @@ window.browserStorage = {
     return {};
   },
   set: async (items) => {
+    // エラーは握りつぶさずthrowして呼び出し側に伝える
     Object.keys(items).forEach(key => {
-      try {
-        const stringified = JSON.stringify(items[key]);
-        if (useLocalStorage) {
-          localStorage.setItem(key, stringified);
-        } else {
-          memoryStorage[key] = stringified;
-        }
-      } catch (e) {
-        console.warn('Storage save failed:', e);
+      const stringified = JSON.stringify(items[key]);
+      if (useLocalStorage) {
+        localStorage.setItem(key, stringified);
+      } else {
+        memoryStorage[key] = stringified;
       }
     });
   },
@@ -163,8 +160,9 @@ const toastElement = document.getElementById('toast');
 
 let currentPageContent = '';
 let falApiKey = null;
-let apiyiApiKey = null;
-let selectedProvider = 'fal'; // 'fal' | 'apiyi'
+let openaiApiKey = null;
+let thumbGenApiKey = null; // サムネ生成管理ツール用 Claude API Key
+let selectedProvider = 'fal'; // 'fal' | 'openai'
 let generatedImages = {}; // スタイルごとの生成画像を保存
 let designConfig = null; // デザイン設定
 let designGroups = []; // デザイングループのリスト
@@ -234,16 +232,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupSampleImageClickEvents();
     updateButtonStates();
 
-    // サーバー上（http/https）で動いている場合はヘルプボタンを非表示にする
-    // 拡張機能（chrome-extension://）の場合はそのまま表示される
-    if (window.location.protocol.startsWith('http')) {
-      const helpBtn = document.getElementById('helpDocsBtn');
-      if (helpBtn) helpBtn.style.display = 'none';
-    } else {
-      // 拡張機能の場合はチュートリアルボタンを非表示にする
-      const tutorialBtn = document.getElementById('tutorialBtn');
-      if (tutorialBtn) tutorialBtn.style.display = 'none';
-    }
+    // Webアプリ版ではヘルプボタンを非表示にする
+    const helpBtn = document.getElementById('helpDocsBtn');
+    if (helpBtn) helpBtn.style.display = 'none';
 
     console.log('App initialization completed');
   } catch (error) {
@@ -308,26 +299,42 @@ async function optimizeBase64Image(base64Image) {
 // デザイングループを読み込む
 async function loadDesignGroups() {
   try {
-    const data = await window.browserStorage.get('designGroups');
+    const data = await window.browserStorage.get(['designGroups', 'customThumbCleanupDone']);
+
+    // 固定(常設)のデフォルトグループを読み込む
+    let permanentDefaults = await fetchPermanentDesignGroups();
+
+    let savedGroups = [];
+    let cleanupTriggered = false;
     if (data.designGroups && Array.isArray(data.designGroups) && data.designGroups.length > 0) {
-      designGroups = data.designGroups;
-      
-      // 移行処理: 旧バージョンの7種データがキャッシュされていれば削除して8種をリロードする
-      const oldIndex = designGroups.findIndex(g => g.name === 'サムネテンプレ7種');
-      const has8 = designGroups.some(g => g.name === 'サムネテンプレ8種');
-      if (oldIndex !== -1 && !has8) {
-        designGroups.splice(oldIndex, 1);
-        await saveDesignGroups();
-        await loadDefaultTemplates();
+      // 旧バージョンのデフォルトテンプレ(サムネテンプレ7種/8種)がストレージに残っていれば除外
+      savedGroups = data.designGroups.filter(g =>
+        g.name !== 'サムネテンプレ7種' && g.name !== 'サムネテンプレ8種'
+      );
+
+      // 「カスタムサムネテンプレート」という名前で残っているグループを一度だけクリーンアップ
+      if (!data.customThumbCleanupDone) {
+        const before = savedGroups.length;
+        savedGroups = savedGroups.filter(g => g.name !== 'カスタムサムネテンプレート');
+        if (savedGroups.length !== before) cleanupTriggered = true;
       }
-    } else {
-      designGroups = [];
-      await loadDefaultTemplates();
+    }
+
+    // 常設グループ（先頭固定）＋ユーザー作成グループを結合
+    designGroups = [...permanentDefaults, ...savedGroups];
+
+    // クリーンアップ結果を保存し、次回以降は再実行しない
+    if (!data.customThumbCleanupDone) {
+      if (cleanupTriggered) {
+        const groupsToSave = savedGroups.filter(g => !g.isPermanent);
+        await window.browserStorage.set({ designGroups: groupsToSave, customThumbCleanupDone: true });
+      } else {
+        await window.browserStorage.set({ customThumbCleanupDone: true });
+      }
     }
   } catch (error) {
     console.error('Failed to load design groups:', error);
     designGroups = [];
-    await loadDefaultTemplates();
   }
   renderDesignGroups();
 }
@@ -369,8 +376,17 @@ async function loadDefaultTemplates() {
 
 // デザイングループを保存
 async function saveDesignGroups() {
-  await window.browserStorage.set({ designGroups: designGroups });
-  await updateStorageUsage(); // ストレージ使用量を更新
+  try {
+    // 常設グループはローカルストレージに保存しない
+    const groupsToSave = designGroups.filter(g => !g.isPermanent);
+    await window.browserStorage.set({ designGroups: groupsToSave });
+    await updateStorageUsage(); // ストレージ使用量を更新
+  } catch (err) {
+    console.error('[saveDesignGroups] Failed to save:', err);
+    const msg = (err && err.message) ? err.message : String(err);
+    showToast('⚠️ 保存に失敗しました: ' + msg, 7000);
+    throw err;
+  }
 }
 
 
@@ -431,6 +447,7 @@ function renderDesignGroups() {
             <div class="aspect-ratio-selector">
               <label>アスペクト比:</label>
               <select class="aspect-ratio-select" data-style="${design.id}" data-group="${group.id}">
+                <option value="5:2" ${defaultAspectRatio === '5:2' ? 'selected' : ''}>5:2</option>
                 <option value="21:9" ${defaultAspectRatio === '21:9' ? 'selected' : ''}>21:9</option>
                 <option value="16:9" ${defaultAspectRatio === '16:9' ? 'selected' : ''}>16:9</option>
                 <option value="3:2" ${defaultAspectRatio === '3:2' ? 'selected' : ''}>3:2</option>
@@ -461,6 +478,17 @@ function renderDesignGroups() {
       styleGrid.innerHTML = '<p style="color:var(--text-dim); grid-column:1/-1; text-align:center;">デザインがありません。</p>';
     }
 
+    // タブペインヘッダー（保存ボタン）は上部の「テンプレ保存」ボタンに統合したため廃止
+    // const tabPaneHeader = document.createElement('div');
+    // tabPaneHeader.className = 'tab-pane-header';
+    // tabPaneHeader.innerHTML = `
+    //   <button class="tab-save-btn" data-group-id="${group.id}" data-state="idle" title="このタブを保存">
+    //     <span class="tab-save-icon">💾</span>
+    //     <span class="tab-save-label">保存</span>
+    //   </button>
+    // `;
+    // tabPane.appendChild(tabPaneHeader);
+
     tabPane.appendChild(styleGrid);
     tabContent.appendChild(tabPane);
   });
@@ -484,59 +512,63 @@ function renderDesignGroups() {
   setupSampleImageClickEvents();
 }
 
+// タブ内の「保存」ボタンがクリックされたときの処理
+async function handleTabSaveClick(btn) {
+  const groupId = btn.dataset.groupId;
+  const group = designGroups.find(g => g.id === groupId);
+  if (!group) return;
+
+  const iconEl = btn.querySelector('.tab-save-icon');
+  const labelEl = btn.querySelector('.tab-save-label');
+
+  btn.dataset.state = 'saving';
+  btn.disabled = true;
+  if (iconEl) iconEl.textContent = '⏳';
+  if (labelEl) labelEl.textContent = '保存中...';
+
+  try {
+    await saveDesignGroups();
+    btn.dataset.state = 'success';
+    if (iconEl) iconEl.textContent = '✅';
+    if (labelEl) labelEl.textContent = '保存済';
+    showToast(`「${group.name}」を保存しました`);
+    setTimeout(() => {
+      if (document.body.contains(btn)) {
+        btn.dataset.state = 'idle';
+        btn.disabled = false;
+        if (iconEl) iconEl.textContent = '💾';
+        if (labelEl) labelEl.textContent = '保存';
+      }
+    }, 2000);
+  } catch (err) {
+    btn.dataset.state = 'error';
+    btn.disabled = false;
+    if (iconEl) iconEl.textContent = '⚠️';
+    if (labelEl) labelEl.textContent = '再試行';
+  }
+}
+
 // タブリスナーの設定（初回のみ）
 let tabListenersSetup = false;
 
 function setupTabListeners() {
-  // タブボタンのクリックイベント（イベント委譲を使用）
+  // タブボタン & 保存ボタンのクリックイベント（イベント委譲を使用）
   if (!tabListenersSetup) {
     document.addEventListener('click', (e) => {
       if (e.target.classList.contains('tab-btn')) {
         switchTab(e.target.dataset.tab);
+        return;
+      }
+      const saveBtn = e.target.closest('.tab-save-btn');
+      if (saveBtn) {
+        handleTabSaveClick(saveBtn);
+        return;
       }
     });
     tabListenersSetup = true;
   }
 
-  // 以下のボタンは初回のみ設定
-  if (tabListenersSetup && document.getElementById('addDesignGroupBtn').hasAttribute('data-listener-set')) {
-    return;
-  }
-
-  // デザイングループ追加ボタン
-  const addDesignGroupBtn = document.getElementById('addDesignGroupBtn');
-  if (addDesignGroupBtn && !addDesignGroupBtn.hasAttribute('data-listener-set')) {
-    addDesignGroupBtn.addEventListener('click', addDesignGroup);
-    addDesignGroupBtn.setAttribute('data-listener-set', 'true');
-  }
-
-  // デザイングループ編集ボタン
-  const editDesignGroupBtn = document.getElementById('editDesignGroupBtn');
-  if (editDesignGroupBtn && !editDesignGroupBtn.hasAttribute('data-listener-set')) {
-    editDesignGroupBtn.addEventListener('click', openDesignEditModal);
-    editDesignGroupBtn.setAttribute('data-listener-set', 'true');
-  }
-
-  // デザイングループ削除ボタン
-  const deleteDesignGroupBtn = document.getElementById('deleteDesignGroupBtn');
-  if (deleteDesignGroupBtn && !deleteDesignGroupBtn.hasAttribute('data-listener-set')) {
-    deleteDesignGroupBtn.addEventListener('click', deleteDesignGroup);
-    deleteDesignGroupBtn.setAttribute('data-listener-set', 'true');
-  }
-
-  // インポートボタン
-  const importDesignGroupBtn = document.getElementById('importDesignGroupBtn');
-  if (importDesignGroupBtn && !importDesignGroupBtn.hasAttribute('data-listener-set')) {
-    importDesignGroupBtn.addEventListener('click', importDesignGroup);
-    importDesignGroupBtn.setAttribute('data-listener-set', 'true');
-  }
-
-  // エクスポートボタン
-  const exportDesignGroupBtn = document.getElementById('exportDesignGroupBtn');
-  if (exportDesignGroupBtn && !exportDesignGroupBtn.hasAttribute('data-listener-set')) {
-    exportDesignGroupBtn.addEventListener('click', exportDesignGroup);
-    exportDesignGroupBtn.setAttribute('data-listener-set', 'true');
-  }
+  // 以下のボタンは削除済みのためリスナー設定不要
 
   // デザイン編集モーダルの閉じるボタン
   const closeDesignEdit = document.querySelector('.close-design-edit');
@@ -589,26 +621,13 @@ function switchTab(tabId) {
   updateButtonStates();
 }
 
-// ボタンの有効/無効を更新
+// ボタンの有効/無効を更新（ボタン削除済みのため空関数として維持）
 function updateButtonStates() {
-  const editBtn = document.getElementById('editDesignGroupBtn');
-  const deleteBtn = document.getElementById('deleteDesignGroupBtn');
-  const exportBtn = document.getElementById('exportDesignGroupBtn');
-
-  // アクティブなタブがない、またはデザイングループがない場合は無効化
-  if (!activeTab || activeTab === 'home' || designGroups.length === 0) {
-    if (editBtn) editBtn.disabled = true;
-    if (deleteBtn) deleteBtn.disabled = true;
-    if (exportBtn) exportBtn.disabled = true;
-  } else {
-    if (editBtn) editBtn.disabled = false;
-    if (deleteBtn) deleteBtn.disabled = false;
-    if (exportBtn) exportBtn.disabled = false;
-  }
+  // 操作ボタンは削除済み
 }
 
 // デザイングループを追加
-function addDesignGroup() {
+async function addDesignGroup() {
   console.log('addDesignGroup clicked');
   const groupName = prompt('デザイングループ名を入力してください:');
   if (!groupName || groupName.trim() === '') {
@@ -623,7 +642,14 @@ function addDesignGroup() {
   };
 
   designGroups.push(newGroup);
-  saveDesignGroups();
+  try {
+    await saveDesignGroups();
+  } catch (e) {
+    // 保存失敗時はロールバック（トーストはsaveDesignGroups側で表示）
+    const idx = designGroups.findIndex(g => g.id === newGroup.id);
+    if (idx !== -1) designGroups.splice(idx, 1);
+    return;
+  }
   renderDesignGroups();
 
   // 新しく作成したタブに切り替える
@@ -741,6 +767,7 @@ function renderDesignsForEdit() {
              <label><i class="fas fa-expand"></i> デフォルトアスペクト比</label>
              <select class="design-aspect-ratio" data-index="${index}">
                <option value="16:9" ${(design.aspectRatio || '16:9') === '16:9' ? 'selected' : ''}>16:9 (YouTubeサムネイル)</option>
+               <option value="5:2" ${(design.aspectRatio || '16:9') === '5:2' ? 'selected' : ''}>5:2 (ワイドバナー)</option>
                <option value="21:9" ${(design.aspectRatio || '16:9') === '21:9' ? 'selected' : ''}>21:9 (ヘッダー)</option>
                <option value="1:1" ${(design.aspectRatio || '16:9') === '1:1' ? 'selected' : ''}>1:1 (Instagram)</option>
                <option value="9:16" ${(design.aspectRatio || '16:9') === '9:16' ? 'selected' : ''}>9:16 (ストーリー)</option>
@@ -997,6 +1024,12 @@ async function deleteDesignGroup() {
     return;
   }
 
+  // 常設グループは削除不可
+  if (group.isPermanent) {
+    alert('固定テンプレートグループは削除できません');
+    return;
+  }
+
   if (!confirm(`「${group.name}」を削除しますか？この操作は取り消せません。`)) {
     return;
   }
@@ -1013,6 +1046,101 @@ async function deleteDesignGroup() {
 
     showToast('グループを削除しました');
   }
+}
+
+// テンプレ削除モーダルを開く
+function openDeleteTemplateModal() {
+  if (!activeTab || activeTab === 'home') {
+    alert('テンプレ削除はタブ（デザイングループ）を選択した状態で使用してください。');
+    return;
+  }
+  const group = designGroups.find(g => g.id === activeTab);
+  if (!group) {
+    alert('対象のグループが見つかりません。');
+    return;
+  }
+  if (!group.designs || group.designs.length === 0) {
+    alert('このタブには削除できるテンプレがありません。');
+    return;
+  }
+
+  const label = document.getElementById('deleteTemplateGroupLabel');
+  if (label) {
+    label.textContent = `対象タブ：${group.name}（${group.designs.length}件）`;
+  }
+
+  const list = document.getElementById('deleteTemplateList');
+  list.innerHTML = '';
+  group.designs.forEach(design => {
+    const sampleImage = design.sampleImage && design.sampleImage !== null ? design.sampleImage : 'design/no_sample_image.jpg';
+    const item = document.createElement('label');
+    item.style.cssText = 'display:flex; flex-direction:column; gap:0.4rem; padding:0.5rem; border:1px solid var(--border-color); border-radius:8px; cursor:pointer; background: var(--bg-elevated, transparent);';
+    item.innerHTML = `
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <input type="checkbox" class="delete-template-checkbox" data-design-id="${design.id}">
+        <span style="font-size:0.85rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${design.name || design.id}</span>
+      </div>
+      <div style="aspect-ratio: 16/9; overflow:hidden; border-radius:4px; background:#111;">
+        <img src="${sampleImage}" alt="${design.name || ''}" style="width:100%; height:100%; object-fit:cover;">
+      </div>
+    `;
+    list.appendChild(item);
+  });
+
+  list.querySelectorAll('.delete-template-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateDeleteTemplateSelectedCount);
+  });
+
+  const selectAll = document.getElementById('deleteTemplateSelectAll');
+  if (selectAll) selectAll.checked = false;
+  updateDeleteTemplateSelectedCount();
+
+  const modal = document.getElementById('deleteTemplateModal');
+  modal.classList.add('show');
+}
+
+function closeDeleteTemplateModal() {
+  const modal = document.getElementById('deleteTemplateModal');
+  modal.classList.remove('show');
+}
+
+function updateDeleteTemplateSelectedCount() {
+  const count = document.querySelectorAll('#deleteTemplateList .delete-template-checkbox:checked').length;
+  const el = document.getElementById('deleteTemplateSelectedCount');
+  if (el) el.textContent = `${count}件選択中`;
+}
+
+function toggleDeleteTemplateSelectAll(checkbox) {
+  document.querySelectorAll('#deleteTemplateList .delete-template-checkbox').forEach(cb => {
+    cb.checked = checkbox.checked;
+  });
+  updateDeleteTemplateSelectedCount();
+}
+
+function confirmDeleteTemplates() {
+  const group = designGroups.find(g => g.id === activeTab);
+  if (!group) {
+    alert('対象のグループが見つかりません。');
+    return;
+  }
+  const checked = Array.from(document.querySelectorAll('#deleteTemplateList .delete-template-checkbox:checked'));
+  if (checked.length === 0) {
+    alert('削除するテンプレを選択してください。');
+    return;
+  }
+  const idsToDelete = new Set(checked.map(cb => cb.dataset.designId));
+  const deleteNames = group.designs.filter(d => idsToDelete.has(d.id)).map(d => d.name || d.id);
+
+  if (!confirm(`以下のテンプレを削除します。この操作は取り消せません。\n\n・${deleteNames.join('\n・')}`)) {
+    return;
+  }
+
+  group.designs = group.designs.filter(d => !idsToDelete.has(d.id));
+  saveDesignGroups();
+  renderDesignGroups();
+  switchTab(activeTab);
+  closeDeleteTemplateModal();
+  showToast(`${idsToDelete.size}件のテンプレを削除しました`);
 }
 
 // デザイングループをインポート
@@ -1193,6 +1321,46 @@ async function processZipFile(fileOrBlob) {
   };
 }
 
+// ====== 常設(Permanent)グループロードロジック ======
+async function loadPermanentZip(zipUrl, groupName, groupId) {
+  try {
+    const response = await fetch(zipUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to load ${zipUrl}: ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    const parsed = await processZipFile(blob);
+    return {
+      id: groupId,
+      name: groupName,
+      designs: parsed.designs,
+      isPermanent: true
+    };
+  } catch (error) {
+    console.error(`Error loading permanent zip: ${zipUrl}`, error);
+    return null;
+  }
+}
+
+async function fetchPermanentDesignGroups() {
+  const timeStamp = new Date().getTime();
+  const zips = [
+    { url: `assets/tags/サムネテンプレ8種.zip?t=${timeStamp}`, name: "サムネテンプレ8種", id: "permanent-thumb8" },
+    { url: `assets/tags/thum7.zip?t=${timeStamp}`, name: "サムネテンプレ7種", id: "permanent-thumb7" },
+    { url: `assets/tags/header5.zip?t=${timeStamp}`, name: "各種ヘッダー5種", id: "permanent-header5" },
+    { url: `assets/tags/chirashi.zip?t=${timeStamp}`, name: "チラシ", id: "permanent-chirashi" },
+    { url: `assets/tags/manga12.zip?t=${timeStamp}`, name: "マンガ", id: "permanent-manga" },
+    { url: `assets/tags/Kindle.zip?t=${timeStamp}`, name: "Kindleテンプレート", id: "permanent-kindle" }
+  ];
+
+  const results = [];
+  for (const z of zips) {
+    const r = await loadPermanentZip(z.url, z.name, z.id);
+    if (r !== null) results.push(r);
+  }
+  return results;
+}
+
 // デザイングループをエクスポート
 async function exportDesignGroup() {
   if (designGroups.length === 0) {
@@ -1301,8 +1469,8 @@ function setupEventListeners() {
     radio.addEventListener('change', (e) => {
       const newProvider = e.target.value;
       // 切り替え前のキーを一時保存し、切り替え先のキーを入力欄に表示
-      if (newProvider === 'apiyi') {
-        apiKeyInput.value = apiyiApiKey || '';
+      if (newProvider === 'openai') {
+        apiKeyInput.value = openaiApiKey || '';
       } else {
         apiKeyInput.value = falApiKey || '';
       }
@@ -1349,6 +1517,52 @@ function setupEventListeners() {
     }
   });
 
+  // サムネ生成管理ツールの連携機能
+  const thumbGenSettingsBtn = document.getElementById('thumbGenSettingsBtn');
+  const thumbGenApiModal = document.getElementById('thumbGenApiModal');
+  const cancelThumbGenApiBtn = document.getElementById('cancelThumbGenApiBtn');
+  const saveThumbGenApiBtn = document.getElementById('saveThumbGenApiBtn');
+  const closeThumbGenBtn = document.querySelector('.close-thumb-gen');
+  const thumbGenApiKeyInput = document.getElementById('thumbGenApiKeyInput');
+  const thumbGenLaunchBtn = document.getElementById('thumbGenLaunchBtn');
+
+  if (thumbGenSettingsBtn) {
+    thumbGenSettingsBtn.addEventListener('click', () => {
+      thumbGenApiKeyInput.value = thumbGenApiKey || '';
+      if (thumbGenApiModal) thumbGenApiModal.classList.add('show');
+    });
+  }
+
+  const closeThumbGenModalFunc = () => {
+    if (thumbGenApiModal) thumbGenApiModal.classList.remove('show');
+  };
+
+  if (closeThumbGenBtn) closeThumbGenBtn.addEventListener('click', closeThumbGenModalFunc);
+  if (cancelThumbGenApiBtn) cancelThumbGenApiBtn.addEventListener('click', closeThumbGenModalFunc);
+  
+  if (saveThumbGenApiBtn) {
+    saveThumbGenApiBtn.addEventListener('click', async () => {
+      const newKey = thumbGenApiKeyInput.value.trim();
+      thumbGenApiKey = newKey;
+      await window.browserStorage.set({ thumbGenApiKey: newKey });
+      showToast('サムネ生成ツール用APIキーを保存しました');
+      closeThumbGenModalFunc();
+    });
+  }
+
+  if (thumbGenLaunchBtn) {
+    thumbGenLaunchBtn.addEventListener('click', () => {
+      openThumbGenToolModal();
+    });
+  }
+
+  // サムネ生成APIモーダルの外側をクリックしたら閉じる
+  window.addEventListener('click', (e) => {
+    if (e.target === thumbGenApiModal) {
+      closeThumbGenModalFunc();
+    }
+  });
+
   // 画像アップロード機能の初期化
   setupImageUpload();
 
@@ -1368,12 +1582,15 @@ function setupEventListeners() {
 
 // APIキーの読み込み
 async function loadApiKey() {
-  const result = await window.browserStorage.get(['falApiKey', 'apiyiApiKey', 'selectedProvider']);
+  const result = await window.browserStorage.get(['falApiKey', 'openaiApiKey', 'selectedProvider', 'thumbGenApiKey']);
   if (result.falApiKey) {
     falApiKey = result.falApiKey;
   }
-  if (result.apiyiApiKey) {
-    apiyiApiKey = result.apiyiApiKey;
+  if (result.openaiApiKey) {
+    openaiApiKey = result.openaiApiKey;
+  }
+  if (result.thumbGenApiKey) {
+    thumbGenApiKey = result.thumbGenApiKey;
   }
   if (result.selectedProvider) {
     selectedProvider = result.selectedProvider;
@@ -1384,13 +1601,13 @@ async function loadApiKey() {
 function openApiModal() {
   // ラジオボタンを現在のプロバイダーに合わせてセット
   const radioFal = document.getElementById('providerFal');
-  const radioApiyi = document.getElementById('providerApiyi');
-  if (radioFal && radioApiyi) {
+  const radioOpenai = document.getElementById('providerOpenai');
+  if (radioFal && radioOpenai) {
     radioFal.checked = selectedProvider === 'fal';
-    radioApiyi.checked = selectedProvider === 'apiyi';
+    radioOpenai.checked = selectedProvider === 'openai';
   }
   // 対応するキーを入力欄に復元
-  apiKeyInput.value = selectedProvider === 'apiyi' ? (apiyiApiKey || '') : (falApiKey || '');
+  apiKeyInput.value = selectedProvider === 'openai' ? (openaiApiKey || '') : (falApiKey || '');
   updateApiModalForProvider(selectedProvider);
   apiModal.classList.add('show');
 }
@@ -1398,17 +1615,17 @@ function openApiModal() {
 // プロバイダー切り替え時にモーダルUIを更新するヘルパー
 function updateApiModalForProvider(provider) {
   const guideBlockFal = document.getElementById('guideBlockFal');
-  const guideBlockApiyi = document.getElementById('guideBlockApiyi');
+  const guideBlockOpenai = document.getElementById('guideBlockOpenai');
   const apiKeyLabel = document.getElementById('apiKeyLabel');
 
-  if (provider === 'apiyi') {
+  if (provider === 'openai') {
     if (guideBlockFal) guideBlockFal.style.display = 'none';
-    if (guideBlockApiyi) guideBlockApiyi.style.display = '';
-    if (apiKeyLabel) apiKeyLabel.textContent = 'APIYI API Key';
+    if (guideBlockOpenai) guideBlockOpenai.style.display = '';
+    if (apiKeyLabel) apiKeyLabel.textContent = 'OpenAI API Key';
     apiKeyInput.placeholder = 'APIキーを入力してください (例: sk-...)';
   } else {
     if (guideBlockFal) guideBlockFal.style.display = '';
-    if (guideBlockApiyi) guideBlockApiyi.style.display = 'none';
+    if (guideBlockOpenai) guideBlockOpenai.style.display = 'none';
     if (apiKeyLabel) apiKeyLabel.textContent = 'FAL API Key';
     apiKeyInput.placeholder = 'APIキーを入力してください (例: fal_key_...)';
   }
@@ -1471,7 +1688,7 @@ function checkApiKeyWarning() {
   const warningElement = document.getElementById('apiKeyWarning');
   if (!warningElement) return;
 
-  const activeKey = selectedProvider === 'apiyi' ? apiyiApiKey : falApiKey;
+  const activeKey = selectedProvider === 'openai' ? openaiApiKey : falApiKey;
   if (!activeKey || activeKey.trim() === '') {
     warningElement.style.display = 'inline-block';
   } else {
@@ -1488,8 +1705,8 @@ async function saveApiKey() {
   }
 
   // 選択中のプロバイダーを読み取る
-  const radioApiyi = document.getElementById('providerApiyi');
-  const newProvider = (radioApiyi && radioApiyi.checked) ? 'apiyi' : 'fal';
+  const radioOpenai = document.getElementById('providerOpenai');
+  const newProvider = (radioOpenai && radioOpenai.checked) ? 'openai' : 'fal';
 
   // プロバイダーが変わった場合はキャッシュをクリア
   if (newProvider !== selectedProvider) {
@@ -1498,9 +1715,9 @@ async function saveApiKey() {
 
   selectedProvider = newProvider;
 
-  if (selectedProvider === 'apiyi') {
-    apiyiApiKey = newApiKey;
-    await window.browserStorage.set({ apiyiApiKey: newApiKey, selectedProvider: 'apiyi' });
+  if (selectedProvider === 'openai') {
+    openaiApiKey = newApiKey;
+    await window.browserStorage.set({ openaiApiKey: newApiKey, selectedProvider: 'openai' });
   } else {
     falApiKey = newApiKey;
     await window.browserStorage.set({ falApiKey: newApiKey, selectedProvider: 'fal' });
@@ -1640,7 +1857,7 @@ async function handleStyleSelection(button) {
           <div style="color: #e67e22; font-size: 14px; font-weight: bold;">⏱️ タイムアウトしました</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">画像生成に時間がかかっています。もう一度「生成」ボタンを押してください。</div>
         `;
-      } else if (error.message && (error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('APIYI_BALANCE_INSUFFICIENT'))) {
+      } else if (error.message && (error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('OPENAI_BALANCE_INSUFFICIENT'))) {
         messageDiv.innerHTML = `
           <div style="color: #e67e22; font-size: 14px; font-weight: bold;">💳 APIの残高が不足しています</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">API料金を追加してから、もう一度お試しください。</div>
@@ -1650,17 +1867,25 @@ async function handleStyleSelection(button) {
           <div style="color: #e74c3c; font-size: 14px; font-weight: bold;">❌ APIキーが設定されていません</div>
           <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">右上の「⚙️ API設定」ボタンからAPIキーを入力してください</div>
         `;
-      } else {
+      } else if (error.message && error.message.includes('OPENAI_ORG_NOT_VERIFIED')) {
         messageDiv.innerHTML = `
-          <div style="color: #e74c3c; font-size: 14px; font-weight: bold;">✖️生成に失敗しました</div>
-          <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">APIキーまたはFAL APIの設定をご確認ください</div>
+          <div style="color: #e67e22; font-size: 14px; font-weight: bold;">🪪 組織の本人確認が必要です</div>
+          <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">OpenAIの<a href="https://platform.openai.com/settings/organization/general" target="_blank" style="color:#3498db;">組織設定ページ</a>で「Verify Organization」を完了してから、約15分待って再度お試しください。</div>
+        `;
+      } else {
+        const providerLabel = (selectedProvider === 'openai') ? 'OpenAI' : 'FAL';
+        const detail = (error && error.message) ? String(error.message).replace(/</g, '&lt;') : '不明なエラー';
+        messageDiv.innerHTML = `
+          <div style="color: #e74c3c; font-size: 14px; font-weight: bold;">✖️ 生成に失敗しました（${providerLabel}）</div>
+          <div style="color: #7f8c8d; font-size: 12px; margin-top: 8px;">${detail}</div>
+          <div style="color: #95a5a6; font-size: 11px; margin-top: 6px;">APIキーや残高、ネットワーク接続をご確認ください。詳細はブラウザの開発者ツール（コンソール）で確認できます。</div>
         `;
       }
 
       generatedImageWrapper.appendChild(messageDiv);
 
       // 10秒後にメッセージを削除（タイムアウト・残高不足の場合は長めに表示）
-      const displayTime = (error.message && (error.message.includes('タイムアウト') || error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('APIYI_BALANCE_INSUFFICIENT'))) ? 10000 : 5000;
+      const displayTime = (error.message && (error.message.includes('タイムアウト') || error.message.includes('FAL_BALANCE_INSUFFICIENT') || error.message.includes('OPENAI_BALANCE_INSUFFICIENT'))) ? 10000 : 5000;
       setTimeout(() => {
         if (generatedImageWrapper.contains(messageDiv)) {
           generatedImageWrapper.removeChild(messageDiv);
@@ -1695,9 +1920,9 @@ function getSelectedThemeColor() {
 async function callImageGenerationAPI(style, groupId = 'home', aspectRatio = '16:9', abortSignal = null) {
   console.log('Generating image with style:', style, 'groupId:', groupId, 'aspectRatio:', aspectRatio);
 
-  // APIYI プロバイダーの場合は専用関数へ委譲
-  if (selectedProvider === 'apiyi') {
-    return await callApiyiAPI(style, groupId, aspectRatio, abortSignal);
+  // OpenAI プロバイダーの場合は専用関数へ委譲
+  if (selectedProvider === 'openai') {
+    return await callOpenaiAPI(style, groupId, aspectRatio, abortSignal);
   }
 
   // APIキーのチェック（FAL AI）
@@ -2005,25 +2230,22 @@ async function callImageGenerationAPI(style, groupId = 'home', aspectRatio = '16
   }
 }
 
-// APIYI (OpenAI互換) 用のアスペクト比→sizeパラメータ変換
+// OpenAI gpt-image-2 用のアスペクト比→sizeパラメータ変換
+// gpt-image-2 がサポートするサイズ: 1024x1024 / 1536x1024 / 1024x1536 / auto
 function mapAspectRatioToSize(aspectRatio) {
-  const map = {
-    '16:9':  '1792x1024',
-    '9:16':  '1024x1792',
-    '1:1':   '1024x1024',
-    '4:3':   '1365x1024',
-    '3:4':   '1024x1365',
-    '3:2':   '1536x1024',
-    '2:3':   '1024x1536',
-  };
-  return map[aspectRatio] || '1024x1024';
+  const landscape = new Set(['16:9', '5:2', '3:2', '4:3']);
+  const portrait  = new Set(['9:16', '2:3', '3:4']);
+  if (aspectRatio === '1:1') return '1024x1024';
+  if (landscape.has(aspectRatio)) return '1536x1024';
+  if (portrait.has(aspectRatio)) return '1024x1536';
+  return '1024x1024';
 }
 
-async function callApiyiAPI(style, groupId, aspectRatio, abortSignal) {
-  console.log('Generating image with APIYI: style:', style, 'groupId:', groupId, 'aspectRatio:', aspectRatio);
+async function callOpenaiAPI(style, groupId, aspectRatio, abortSignal) {
+  console.log('Generating image with OpenAI gpt-image-2: style:', style, 'groupId:', groupId, 'aspectRatio:', aspectRatio);
 
-  if (!apiyiApiKey || apiyiApiKey.trim() === '') {
-    throw new Error('APIYIのAPIキーが設定されていません。右上の「⚙️ API設定」ボタンからAPIキーを入力してください。');
+  if (!openaiApiKey || openaiApiKey.trim() === '') {
+    throw new Error('OpenAIのAPIキーが設定されていません。右上の「⚙️ API設定」ボタンからAPIキーを入力してください。');
   }
 
   // タイトルとページ内容を取得
@@ -2076,55 +2298,93 @@ async function callApiyiAPI(style, groupId, aspectRatio, abortSignal) {
   }
   fullPrompt += `記事本文:\n${content.substring(0, 1000)}`;
 
-  const requestBody = {
-    model: 'nano-banana-pro',
-    prompt: fullPrompt,
-    n: 1,
-    size: mapAspectRatioToSize(aspectRatio),
-  };
+  // gpt-image-2 を優先し、未公開/未提供の場合は gpt-image-1 へ自動フォールバック
+  const modelCandidates = ['gpt-image-2', 'gpt-image-1'];
+  let lastError = null;
 
-  const fetchOptions = {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiyiApiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
-  };
+  for (const modelName of modelCandidates) {
+    const requestBody = {
+      model: modelName,
+      prompt: fullPrompt,
+      n: 1,
+      size: mapAspectRatioToSize(aspectRatio),
+    };
 
-  if (abortSignal) {
-    fetchOptions.signal = abortSignal;
-  }
+    const fetchOptions = {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    };
 
-  try {
-    const response = await fetch('https://api.apiyi.com/v1/images/generations', fetchOptions);
+    if (abortSignal) {
+      fetchOptions.signal = abortSignal;
+    }
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const isBalanceError = response.status === 402 ||
-        (errorData.error && errorData.error.message &&
-          ['balance', 'credit', 'payment', 'insufficient'].some(kw =>
-            errorData.error.message.toLowerCase().includes(kw)
-          ));
-      if (isBalanceError) {
-        throw new Error('APIYI_BALANCE_INSUFFICIENT');
+    try {
+      console.log(`OpenAI image request: model=${modelName}, size=${requestBody.size}`);
+      const response = await fetch('https://api.openai.com/v1/images/generations', fetchOptions);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errMsg = (errorData.error && errorData.error.message) || '';
+        const errCode = (errorData.error && errorData.error.code) || '';
+        const errType = (errorData.error && errorData.error.type) || '';
+        console.error(`OpenAI ${response.status} (model=${modelName}):`, errorData);
+
+        // モデル未提供 → 次の候補へフォールバック
+        const isModelMissing =
+          errCode === 'model_not_found' ||
+          errType === 'invalid_request_error' && /model/i.test(errMsg) && /(not.*found|does not exist|unknown)/i.test(errMsg);
+        if (isModelMissing && modelName !== modelCandidates[modelCandidates.length - 1]) {
+          console.warn(`Model ${modelName} not available, falling back to next candidate`);
+          lastError = new Error(`OpenAI API Error: ${response.status} - ${errMsg || response.statusText}`);
+          continue;
+        }
+
+        // 残高不足
+        const isBalanceError = response.status === 402 ||
+          ['billing', 'quota', 'insufficient_quota', 'balance', 'credit', 'payment', 'insufficient'].some(kw =>
+            errMsg.toLowerCase().includes(kw) || String(errCode).toLowerCase().includes(kw)
+          );
+        if (isBalanceError) {
+          throw new Error('OPENAI_BALANCE_INSUFFICIENT');
+        }
+
+        // 組織未認証（gpt-image-1 / gpt-image-2 は組織のVerificationが必須）
+        const isOrgVerification =
+          response.status === 403 ||
+          /verification|verify.*organi[sz]ation|must be verified/i.test(errMsg);
+        if (isOrgVerification) {
+          throw new Error('OPENAI_ORG_NOT_VERIFIED');
+        }
+
+        throw new Error(`OpenAI API Error: ${response.status} - ${errMsg || response.statusText}`);
       }
-      const errorMsg = (errorData.error && errorData.error.message) || response.statusText;
-      throw new Error(`APIYI API Error: ${response.status} - ${errorMsg}`);
+
+      const data = await response.json();
+      console.log(`OpenAI API success (model=${modelName})`);
+
+      if (data.data && data.data.length > 0) {
+        const item = data.data[0];
+        if (item.url) return item.url;
+        if (item.b64_json) return `data:image/png;base64,${item.b64_json}`;
+      }
+      throw new Error('OpenAIからの画像生成に失敗しました（レスポンス形式が想定外）');
+
+    } catch (error) {
+      // ネットワークエラー(TypeError)で最後の候補なら詳細メッセージを残す
+      if (error.name === 'AbortError') throw error;
+      console.error(`OpenAI request failed (model=${modelName}):`, error);
+      lastError = error;
+      // エラーが「フォールバック対象でない」場合は即座に投げる
+      const isFallbackable = error.message && /OpenAI API Error: 4\d\d/.test(error.message) && modelName !== modelCandidates[modelCandidates.length - 1];
+      if (!isFallbackable) throw error;
     }
-
-    const data = await response.json();
-    console.log('APIYI API Response:', data);
-
-    if (data.data && data.data.length > 0 && data.data[0].url) {
-      return data.data[0].url;
-    }
-    throw new Error('APIYIからの画像生成に失敗しました');
-
-  } catch (error) {
-    console.error('APIYI API Error:', error);
-    throw error;
   }
+  throw lastError || new Error('OpenAIからの画像生成に失敗しました');
 }
 
 // 結果をポーリングで取得（app.jsの実装を参考）
@@ -2344,10 +2604,14 @@ function setupImageUpload() {
   const removeDesignBtn = document.getElementById('removeDesignBtn');
 
   // キャラクター画像のイベント設定
-  setupImageUploadZone(characterZone, characterInput, characterPreview, removeCharacterBtn, 'character');
+  if (characterZone) {
+    setupImageUploadZone(characterZone, characterInput, characterPreview, removeCharacterBtn, 'character');
+  }
 
   // デザイン参考画像のイベント設定
-  setupImageUploadZone(designZone, designInput, designPreview, removeDesignBtn, 'design');
+  if (designZone) {
+    setupImageUploadZone(designZone, designInput, designPreview, removeDesignBtn, 'design');
+  }
 }
 
 // 画像アップロードゾーンのイベント設定
@@ -3070,4 +3334,438 @@ document.addEventListener('dragstart', function (e) {
     e.preventDefault();
   }
 });
+
+// ===== サムネテンプレート生成ツール (モーダル統合版) =====
+(function() {
+  const ANALYZE_PROMPT = `You are an expert thumbnail/banner design analyst for an AI image generation system called ClickDesign.
+
+Analyze the uploaded thumbnail image and produce a structured YAML-style prompt that can reproduce a similar design.
+
+Your output must be a JSON object with these fields:
+- "name": A short descriptive Japanese name for this design style (e.g. "YouTube解説サムネ", "セミナー告知バナー")
+- "aspectRatio": Detect the aspect ratio. Choose the closest from: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16
+- "useImageToImage": true if the design heavily relies on photographic elements that should be preserved, false if it's primarily graphic/text-based
+- "prompt": A detailed YAML-style prompt string for reproducing this design. The prompt MUST follow this structure:
+
+version: "1.0"
+template_name: "(English name for the template)"
+
+canvas_settings:
+  aspect_ratio: "(detected ratio)"
+  resolution: "(appropriate resolution)"
+  color_theme: "(list primary colors used)"
+
+layout_skeleton:
+  background:
+    style: "(describe background: gradients, patterns, solid colors, photo overlays)"
+    primary_color: "(hex)"
+    secondary_color: "(hex)"
+  main_visual:
+    position: "(describe position and size)"
+    style: "(describe the main visual element: photo cutout, illustration, icon, etc.)"
+  text_areas:
+    headline:
+      position: "(where the main title goes)"
+      style: "(font style: bold, outlined, shadowed, etc.)"
+      color: "(hex)"
+      size: "(relative: large, medium, small)"
+    subheadline:
+      position: "(where subtitle/subtext goes)"
+      style: "(font style)"
+      color: "(hex)"
+  decorative_elements:
+    - type: "(shapes, lines, badges, ribbons, etc.)"
+      position: "(where)"
+      color: "(hex)"
+      style: "(describe)"
+
+design_instructions:
+  overall_mood: "(professional, energetic, calm, urgent, etc.)"
+  typography_notes: "(Japanese font recommendations, weight, spacing)"
+  composition_notes: "(key composition rules for this layout)"
+
+IMPORTANT:
+- Be extremely detailed and specific about colors (use hex codes), positions, sizes, and styles
+- The prompt should be detailed enough that an AI image generator can reproduce a very similar design
+- All text in the prompt should describe the TEMPLATE/LAYOUT, not the specific content
+- Use placeholders like {title}, {subtitle}, {name} for text content areas
+- Focus on the visual structure, not the actual text content shown
+
+Return ONLY a valid JSON object, no markdown fences.`;
+
+  const ASPECT_RATIOS = ['16:9', '5:2', '21:9', '1:1', '9:16', '4:3', '3:4'];
+
+  // 内部state
+  let tgtTemplates = [];
+  let tgtIsAnalyzing = false;
+
+  // DOM取得ヘルパー
+  const $ = id => document.getElementById(id);
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        const base64 = dataUrl.split(',')[1];
+        resolve({ base64, mimeType: file.type, dataUrl });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // モーダル開閉
+  window.openThumbGenToolModal = function() {
+    const modal = $('thumbGenToolModal');
+    if (modal) modal.classList.add('show');
+  };
+
+  function closeThumbGenToolModal() {
+    const modal = $('thumbGenToolModal');
+    if (modal) modal.classList.remove('show');
+  }
+
+  // フレームワークトグル
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('#tgtFrameworkToggle');
+    if (toggle) {
+      const body = $('tgtFrameworkBody');
+      const isHidden = body.style.display === 'none';
+      body.style.display = isHidden ? 'block' : 'none';
+      toggle.classList.toggle('open', isHidden);
+    }
+  });
+
+  // 閉じるボタン
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.close-thumb-gen-tool')) {
+      closeThumbGenToolModal();
+    }
+    // オーバーレイクリック
+    if (e.target === $('thumbGenToolModal')) {
+      closeThumbGenToolModal();
+    }
+  });
+
+  // ドラッグ＆ドロップ
+  document.addEventListener('dragover', (e) => {
+    const zone = e.target.closest('#tgtUploadZone');
+    if (zone) {
+      e.preventDefault();
+      zone.classList.add('dragging');
+    }
+  });
+  document.addEventListener('dragleave', (e) => {
+    const zone = e.target.closest('#tgtUploadZone');
+    if (zone) zone.classList.remove('dragging');
+  });
+  document.addEventListener('drop', (e) => {
+    const zone = e.target.closest('#tgtUploadZone');
+    if (zone) {
+      e.preventDefault();
+      zone.classList.remove('dragging');
+      if (!tgtIsAnalyzing) {
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        if (files.length) handleTgtImages(files);
+      }
+    }
+  });
+
+  // ファイル選択ボタン
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#tgtSelectFilesBtn')) {
+      if (!tgtIsAnalyzing) $('tgtFileInput').click();
+    }
+    // アップロードゾーン全体のクリック
+    if (e.target.closest('#tgtUploadZone') && !e.target.closest('#tgtSelectFilesBtn') && !e.target.closest('.btn')) {
+      if (!tgtIsAnalyzing) $('tgtFileInput').click();
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'tgtFileInput') {
+      const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+      if (files.length) handleTgtImages(files);
+      e.target.value = '';
+    }
+  });
+
+  // Claude API呼び出し
+  async function callClaudeAnalysis(base64, mimeType) {
+    if (!thumbGenApiKey) {
+      throw new Error('APIキーが設定されていません。歯車アイコンからClaude APIキーを設定してください。');
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': thumbGenApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType || 'image/jpeg', data: base64 } },
+            { type: 'text', text: ANALYZE_PROMPT }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Claude API error: ${response.status} ${errText}`);
+    }
+
+    const data = await response.json();
+    const text = data.content?.find(b => b.type === 'text')?.text ?? '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Claude応答のJSON解析に失敗しました');
+    return JSON.parse(match[0]);
+  }
+
+  // 画像解析メインハンドラ
+  async function handleTgtImages(files) {
+    if (!thumbGenApiKey) {
+      // API設定モーダルを開く
+      const thumbGenApiModal = $('thumbGenApiModal');
+      if (thumbGenApiModal) thumbGenApiModal.classList.add('show');
+      showToast('先にClaude APIキーを設定してください');
+      return;
+    }
+
+    tgtIsAnalyzing = true;
+    $('tgtUploadZone').classList.add('disabled');
+    $('tgtProgress').style.display = 'flex';
+    $('tgtError').style.display = 'none';
+
+    const startIndex = tgtTemplates.length;
+
+    for (let i = 0; i < files.length; i++) {
+      $('tgtProgressText').textContent = `解析中... ${i + 1} / ${files.length}`;
+      try {
+        const { base64, mimeType, dataUrl } = await fileToBase64(files[i]);
+        const id = `banner${String(startIndex + i + 1).padStart(3, '0')}`;
+
+        const result = await callClaudeAnalysis(base64, mimeType);
+
+        tgtTemplates.push({
+          id,
+          name: result.name || 'カスタムデザイン',
+          aspectRatio: result.aspectRatio || '16:9',
+          useImageToImage: result.useImageToImage || false,
+          imageBase64: base64,
+          dataUrl: dataUrl,
+          fileName: files[i].name
+        });
+      } catch (err) {
+        console.error(`File ${files[i].name} failed:`, err);
+        $('tgtError').textContent = `${files[i].name} の解析に失敗: ${err.message}`;
+        $('tgtError').style.display = 'block';
+      }
+    }
+
+    tgtIsAnalyzing = false;
+    $('tgtUploadZone').classList.remove('disabled');
+    $('tgtProgress').style.display = 'none';
+
+    renderTgtResults();
+  }
+
+  // 結果レンダリング
+  function renderTgtResults() {
+    const grid = $('tgtResultsGrid');
+    const section = $('tgtResultsSection');
+
+    if (tgtTemplates.length === 0) {
+      section.style.display = 'none';
+      grid.innerHTML = '';
+      return;
+    }
+
+    section.style.display = 'block';
+
+    grid.innerHTML = tgtTemplates.map((tmpl, i) => `
+      <div class="tgt-card" data-index="${i}">
+        <div class="tgt-card-header">
+          <div class="tgt-card-header-left">
+            <span class="tgt-card-id">${tmpl.id}</span>
+            <input class="tgt-card-name" value="${escapeHtml(tmpl.name)}" data-field="name" data-index="${i}">
+          </div>
+          <button class="tgt-card-remove" data-remove="${i}" title="削除">&times;</button>
+        </div>
+        <div class="tgt-card-thumb">
+          <img src="${tmpl.dataUrl}" alt="${escapeHtml(tmpl.name)}">
+        </div>
+        <div class="tgt-card-settings" style="padding: 10px 12px 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <span style="font-size: 0.72rem; color: #94a3b8; font-weight: 600;">アスペクト比:</span>
+            <select data-field="aspectRatio" data-index="${i}" style="flex:1; padding: 6px 28px 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; font-size: 0.82rem; background: rgba(99,102,241,0.15); color: #c7d2fe; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 fill=%27%2394a3b8%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M8 11L3 6h10z%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 8px center;">
+              ${ASPECT_RATIOS.map(r => `<option value="${r}"${r === tmpl.aspectRatio ? ' selected' : ''} style="background:#1e293b;color:#e2e8f0;">${r}</option>`).join('')}
+            </select>
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #94a3b8; font-weight: 600; cursor: pointer;">
+            <input type="checkbox" data-field="useImageToImage" data-index="${i}"${tmpl.useImageToImage ? ' checked' : ''} style="margin: 0;">
+            Image-to-Image
+          </label>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // 結果の編集イベント（イベント委譲）
+  document.addEventListener('input', (e) => {
+    const idx = e.target.dataset?.index;
+    const field = e.target.dataset?.field;
+    if (idx === undefined || field === undefined) return;
+    if (!e.target.closest('#tgtResultsGrid')) return;
+
+    const i = parseInt(idx);
+    if (i >= 0 && i < tgtTemplates.length) {
+      if (field === 'useImageToImage') {
+        tgtTemplates[i][field] = e.target.checked;
+      } else {
+        tgtTemplates[i][field] = e.target.value;
+      }
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    const idx = e.target.dataset?.index;
+    const field = e.target.dataset?.field;
+    if (idx === undefined || field === undefined) return;
+    if (!e.target.closest('#tgtResultsGrid')) return;
+
+    const i = parseInt(idx);
+    if (i >= 0 && i < tgtTemplates.length) {
+      if (field === 'useImageToImage') {
+        tgtTemplates[i][field] = e.target.checked;
+      } else {
+        tgtTemplates[i][field] = e.target.value;
+      }
+    }
+  });
+
+  // カード削除
+  document.addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('[data-remove]');
+    if (removeBtn && removeBtn.closest('#tgtResultsGrid')) {
+      const i = parseInt(removeBtn.dataset.remove);
+      tgtTemplates.splice(i, 1);
+      // IDを振り直す
+      tgtTemplates.forEach((t, idx) => { t.id = `banner${String(idx + 1).padStart(3, '0')}`; });
+      renderTgtResults();
+    }
+  });
+
+  // クリアボタン
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#tgtClearBtn')) {
+      tgtTemplates = [];
+      $('tgtError').style.display = 'none';
+      renderTgtResults();
+    }
+  });
+
+  // ZIPダウンロード
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest('#tgtDownloadBtn')) {
+      if (tgtTemplates.length === 0) return;
+      const groupName = $('tgtGroupName').value.trim() || 'カスタムサムネテンプレート';
+
+      try {
+        const zip = new JSZip();
+        const imagesFolder = zip.folder('images');
+        const pack = { name: groupName, designs: [] };
+
+        for (const tmpl of tgtTemplates) {
+          const ext = tmpl.fileName.split('.').pop() || 'jpg';
+          const imageFileName = `${tmpl.id}.${ext}`;
+          imagesFolder.file(imageFileName, tmpl.imageBase64, { base64: true });
+          pack.designs.push({
+            id: tmpl.id,
+            name: tmpl.name,
+            aspectRatio: tmpl.aspectRatio,
+            sampleImage: `images/${imageFileName}`,
+            useImageToImage: tmpl.useImageToImage
+          });
+        }
+
+        zip.file('design.json', JSON.stringify(pack, null, 2));
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${groupName.replace(/\s+/g, '-')}-template-pack.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('ZIPをダウンロードしました');
+      } catch (err) {
+        showToast('ZIPの生成に失敗しました: ' + err.message);
+      }
+    }
+  });
+
+  // ClickDesignに直接インポート
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest('#tgtImportBtn')) {
+      if (tgtTemplates.length === 0) return;
+      const groupName = $('tgtGroupName').value.trim() || 'カスタムサムネテンプレート';
+
+      try {
+        // ZIPを内部生成してprocessZipFileに渡す
+        const zip = new JSZip();
+        const imagesFolder = zip.folder('images');
+        const pack = { name: groupName, designs: [] };
+
+        for (const tmpl of tgtTemplates) {
+          const ext = tmpl.fileName.split('.').pop() || 'jpg';
+          const imageFileName = `${tmpl.id}.${ext}`;
+          imagesFolder.file(imageFileName, tmpl.imageBase64, { base64: true });
+          pack.designs.push({
+            id: tmpl.id,
+            name: tmpl.name,
+            aspectRatio: tmpl.aspectRatio,
+            sampleImage: `images/${imageFileName}`,
+            useImageToImage: tmpl.useImageToImage
+          });
+        }
+
+        zip.file('design.json', JSON.stringify(pack, null, 2));
+        const blob = await zip.generateAsync({ type: 'blob' });
+
+        // 既存のprocessZipFileを利用してインポート
+        const newGroup = await processZipFile(blob);
+        if (newGroup) {
+          designGroups.push(newGroup);
+          await saveDesignGroups();
+          renderDesignGroups();
+          showToast(`「${newGroup.name}」をインポートしました`);
+          switchTab(newGroup.id);
+          closeThumbGenToolModal();
+
+          // 生成結果をクリア
+          tgtTemplates = [];
+          renderTgtResults();
+        }
+      } catch (err) {
+        showToast('インポートに失敗しました: ' + err.message);
+        console.error('Direct import error:', err);
+      }
+    }
+  });
+
+})();
 
