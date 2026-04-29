@@ -196,7 +196,7 @@
         } else if (error.code === 'auth/too-many-requests') {
           showError('一時的にアクセスが制限されています。しばらくしてからお試しください。');
         } else {
-          showError('メールの送信に失敗しました。時間をおいて再度お試しください。');
+          showError('メールの送信に失敗しました [' + (error.code || 'unknown') + ']: ' + (error.message || ''));
         }
       } finally {
         setButtonLoading(false);
