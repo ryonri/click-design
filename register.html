@@ -907,6 +907,12 @@
           <button id="regSubmitBtn" type="button" class="auth-login-btn">
             <i class="fas fa-check"></i> 登録する
           </button>
+
+          <div class="cd-login-cta" style="text-align:center;">
+            <a href="index.html">
+              <i class="fas fa-sign-in-alt"></i> 既にご登録済みの方はこちらからログイン
+            </a>
+          </div>
         </form>
 
         <!-- ====== 英語メール事前案内（登録者の不安を先回りで払拭） ====== -->
@@ -1112,7 +1118,7 @@
         } catch (err) {
           console.error(err);
           if (err.code === 'permission-denied') {
-            showError('登録に失敗しました。合言葉が間違っているか、既に登録済みのメールアドレスです。ログインをお試しいただくか、合言葉をご確認ください。');
+            showError('登録に失敗しました。合言葉が間違っているか、既に登録済みのメールアドレスです。既に登録済みの方は、下のリンクからログインページへお進みください。');
           } else if (err.code === 'auth/too-many-requests') {
             showError('一時的にアクセスが制限されています。しばらくしてからお試しください。');
           } else {
