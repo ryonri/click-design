@@ -348,11 +348,16 @@ input, textarea {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .tab-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 1.5rem;
+  row-gap: 0.4rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .tab-btn {
